@@ -28,8 +28,8 @@ def manda_messaggio_telegram(testo):
     print("Telegram Token o Chat ID mancanti.")
     return
 
-  # Inviamo come testo semplice per evitare problemi di sintassi Markdown
-  url = f"https://api.telegram.com/bot{TELEGRAM_TOKEN}/sendMessage"
+  # URL ufficiale e corretto delle API di Telegram
+  url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
   payload = {"chat_id": CHAT_ID, "text": testo}
   try:
     response = requests.post(url, json=payload, timeout=10)
@@ -46,7 +46,7 @@ def cerca_affari():
   print("Bot avviato in background...")
   time.sleep(3)
 
-  # Messaggio di prova pulito senza formattazioni complesse
+  # Messaggio di prova su Telegram
   manda_messaggio_telegram(
       "TEST: Bot Vinted avviato con successo su Render!"
   )
@@ -71,7 +71,6 @@ def cerca_affari():
       query = item["query"]
       prezzo_max = item["prezzo_max"]
 
-      # Utilizziamo l'endpoint di ricerca web/catalogo standard
       url = f"https://www.vinted.it/catalog?search_text={query}&price_to={prezzo_max}&currency=EUR"
 
       try:
