@@ -25,11 +25,12 @@ if GEMINI_API_KEY:
 
 def manda_messaggio_telegram(testo):
   if not TELEGRAM_TOKEN or not CHAT_ID:
-    print("Telegram Token o Chat ID mancanti nelle variabili d'ambiente.")
+    print("Telegram Token o Chat ID mancanti.")
     return
 
+  # Inviamo come testo semplice per evitare problemi di sintassi Markdown
   url = f"https://api.telegram.com/bot{TELEGRAM_TOKEN}/sendMessage"
-  payload = {"chat_id": CHAT_ID, "text": testo, "parse_mode": "Markdown"}
+  payload = {"chat_id": CHAT_ID, "text": testo}
   try:
     response = requests.post(url, json=payload, timeout=10)
     print(
@@ -45,10 +46,9 @@ def cerca_affari():
   print("Bot avviato in background...")
   time.sleep(3)
 
-  # Messaggio di avvio ufficiale su Telegram
+  # Messaggio di prova pulito senza formattazioni complesse
   manda_messaggio_telegram(
-      "🚀 *Bot Vinted avviato con successo su Render!*\nA caccia di"
-      " streetwear..."
+      "TEST: Bot Vinted avviato con successo su Render!"
   )
 
   ricerche = [
@@ -63,60 +63,26 @@ def cerca_affari():
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
           " like Gecko) Chrome/122.0.0.0 Safari/537.36"
       ),
-      "Accept": "application/json, text/plain, */*",
-      "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
-      "Referer": "https://www.vinted.it/",
+      "Accept-Language": "it-IT,it;q=0.9",
   }
-
-  # Inizializziamo la sessione visitando Vinted per acquisire i cookie di base
-  try:
-    session.get("https://www.vinted.it", headers=headers, timeout=10)
-  except Exception as e:
-    print(f"Impossibile connettersi alla home di Vinted: {e}")
 
   while True:
     for item in ricerche:
       query = item["query"]
       prezzo_max = item["prezzo_max"]
 
-      url = f"https://www.vinted.it/api/v2/catalog/items?search_text={query}&price_to={prezzo_max}&order=newest_first"
+      # Utilizziamo l'endpoint di ricerca web/catalogo standard
+      url = f"https://www.vinted.it/catalog?search_text={query}&price_to={prezzo_max}&currency=EUR"
 
       try:
         response = session.get(url, headers=headers, timeout=10)
-
-        if response.status_code == 200:
-          data = response.json()
-          items_list = data.get("items", [])
-          print(
-              f"Ricerca '{query}': trovati {len(items_list)} articoli senza"
-              " errori."
-          )
-
-          for p in items_list[:2]:
-            titolo = p.get("title")
-            prezzo = p.get("price")
-            valuta = p.get("currency", "€")
-            link = f"https://www.vinted.it{p.get('url')}"
-
-            messaggio = (
-                f"🔥 *Nuovo affare trovato!*\n\n"
-                f"👕 *Oggetto:* {titolo}\n"
-                f"💰 *Prezzo:* {prezzo} {valuta}\n"
-                f"🔍 *Ricerca:* {query}\n\n"
-                f"[🔗 Apri su Vinted]({link})"
-            )
-            manda_messaggio_telegram(messaggio)
-            print(f"-> Trovato e inviato: {titolo} a {prezzo} {valuta}")
-        else:
-          print(
-              f"Risposta Vinted per '{query}': {response.status_code} -"
-              f" {response.text[:100]}"
-          )
-
+        print(
+            f"Controllo ricerca '{query}': stato HTTP {response.status_code}"
+        )
       except Exception as e:
-        print(f"Errore durante lo scraping di '{query}': {e}")
+        print(f"Errore durante la richiesta per '{query}': {e}")
 
-      time.sleep(30)
+      time.sleep(45)
 
     time.sleep(120)
 
