@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 import google.generativeai as genai
 from flask import Flask
@@ -31,7 +32,87 @@ def manda_messaggio_telegram(testo):
     print(f"Errore nell'invio del messaggio Telegram: {e}")
 
 
-# --- AVVIO STANDARD PER FLASK (Usato da Gunicorn) ---
-if __name__ == "__main__":
-  port = int(os.environ.get("PORT", 10000))
-  app.run(host="0.0.0.0", port=port)
+# --- LOGICA DEL BOT VINTED ---
+def cerca_affari():
+  print("Bot avviato in background...")
+  time.sleep(5)
+
+  # Messaggio di avvio ufficiale su Telegram
+  manda_messaggio_telegram(
+      "🚀 **Bot Vinted avviato con successo su Render!**\nA caccia di"
+      " streetwear..."
+  )
+
+  ricerche = [
+      {"query": "nike center swoosh", "prezzo_max": 35},
+      {"query": "nike tech fleece", "prezzo_max": 45},
+      {"query": "jordan hoodie", "prezzo_max": 30},
+  ]
+
+  session = requests.Session()
+  headers = {
+      "User-Agent": (
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
+          " like Gecko) Chrome/122.0.0.0 Safari/537.36"
+      ),
+      "Accept": (
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+      ),
+      "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+      "Accept-Encoding": "gzip, deflate, br",
+      "Connection": "keep-alive",
+  }
+
+  try:
+    session.get("https://www.vinted.it", headers=headers, timeout=10)
+  except Exception as e:
+    print(f"Impossibile connettersi alla home di Vinted: {e}")
+
+  while True:
+    for item in ricerche:
+      query = item["query"]
+      prezzo_max = item["prezzo_max"]
+
+      url = f"https://www.vinted.it/api/v2/catalog/items?search_text={query}&price_to={prezzo_max}&order=newest_first"
+
+      try:
+        headers["Referer"] = f"https://www.vinted.it/catalog?search_text={query}"
+        response = session.get(url, headers=headers, timeout=10)
+
+        if response.status_code == 200:
+          data = response.json()
+          items = data.get("items", [])
+          print(
+              f"Ricerca '{query}': trovati {len(items)} articoli senza errori."
+          )
+
+          for p in items[:2]:
+            titolo = p.get("title")
+            prezzo = p.get("price")
+            valuta = p.get("currency", "€")
+            link = f"https://www.vinted.it{p.get('url')}"
+
+            # Messaggio notifica affare
+            messaggio = (
+                f"🔥 **Nuovo affare trovato!**\n\n"
+                f"👕 **Oggetto:** {titolo}\n"
+                f"💰 **Prezzo:** {prezzo} {valuta}\n"
+                f"🔍 **Ricerca:** {query}\n\n"
+                f"[🔗 Apri su Vinted]({link})"
+            )
+            manda_messaggio_telegram(messaggio)
+            print(f"-> Trovato e inviato: {titolo} a {prezzo} {valuta}")
+        else:
+          print(f"Risposta Vinted per '{query}': {response.status_code}")
+
+      except Exception as e:
+        print(f"Errore durante lo scraping di '{query}': {e}")
+
+      time.sleep(45)
+
+    time.sleep(300)
+
+
+# --- AVVIO AUTOMATICO DEL THREAD PER GUNICORN ---
+bot_thread = threading.Thread(target=cerca_affari, daemon=True)
+bot_thread.start()
