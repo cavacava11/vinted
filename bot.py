@@ -69,19 +69,19 @@ def analizza_con_gemini(
 
 # --- LOGICA DEL BOT VINTED ---
 def cerca_affari():
-  print("Bot avviato in background con analisi completa...")
+  print("Bot avviato in background con limite acquisto a 15€...")
   time.sleep(3)
 
   manda_messaggio_telegram(
-      "🚀 *TEST: Bot Vinted Arbitrage avviato!*\nNome articolo in cima e"
-      " metriche pronte."
+      "🚀 *Bot Vinted Arbitrage operativo!*\nFiltro prezzo massimo d'acquisto"
+      " aggiornato a *15€*."
   )
 
-  # Ricerche con prezzo massimo di acquisto <= 12€ e target di vetrina associato
+  # Ricerche con prezzo massimo di acquisto impostato a 15€ e target di vetrina associato
   ricerche = [
-      {"query": "nike center swoosh", "prezzo_max": 12, "target_vetrina": 35},
-      {"query": "nike tech fleece", "prezzo_max": 12, "target_vetrina": 45},
-      {"query": "jordan hoodie", "prezzo_max": 12, "target_vetrina": 40},
+      {"query": "nike center swoosh", "prezzo_max": 15, "target_vetrina": 35},
+      {"query": "nike tech fleece", "prezzo_max": 15, "target_vetrina": 45},
+      {"query": "jordan hoodie", "prezzo_max": 15, "target_vetrina": 40},
   ]
 
   session = requests.Session()
