@@ -5,7 +5,7 @@ import google.generativeai as genai
 from flask import Flask
 import requests
 
-# --- CONFIGURAZIONE FLASK (Pinger per Render 24/7) ---
+# --- CONFIGURAZIONE FLASK (Server Web per Render) ---
 app = Flask(__name__)
 
 
@@ -14,18 +14,12 @@ def home():
   return "Il bot Vinted è attivo e operativo 24/7!"
 
 
-def run_flask():
-  port = int(os.environ.get("PORT", 10000))
-  app.run(host="0.0.0.0", port=port)
-
-
 # --- CONFIGURAZIONE CHIAVI E API ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
 
 
 def manda_messaggio_telegram(testo):
@@ -39,12 +33,13 @@ def manda_messaggio_telegram(testo):
 
 # --- LOGICA DEL BOT VINTED ---
 def cerca_affari():
-  print("Avvio ricerca automatica Vinted...")
+  print("Bot avviato in background, attesa connessione...")
+  time.sleep(10)  # Breve attesa per stabilizzare il server
   manda_messaggio_telegram(
-      "🚀 Bot Vinted avviato e a caccia di affari su Render!"
+      "🚀 **Bot Vinted avviato con successo su Render!**\nA caccia di"
+      " streetwear..."
   )
 
-  # Configurazione ricerche (puoi personalizzare termini e prezzi massimi)
   ricerche = [
       {"query": "nike center swoosh", "prezzo_max": 35},
       {"query": "nike tech fleece", "prezzo_max": 45},
@@ -72,53 +67,29 @@ def cerca_affari():
           data = response.json()
           items = data.get("items", [])
 
-          # Prendiamo gli ultimi 3 articoli trovati
-          for p in items[:3]:
+          for p in items[:2]:
             titolo = p.get("title")
             prezzo = p.get("price")
             valuta = p.get("currency", "€")
             link = f"https://www.vinted.it{p.get('url')}"
-            foto_url = (
-                p.get("photos", [{}])[0].get("full_size_url")
-                if p.get("photos")
-                else None
-            )
 
-            # Esempio di validazione rapida con Gemini se necessario o invio diretto
-            messaggio = (
-                f"🔥 **Nuovo affare trovato!**\n\n"
-                f"👕 **Oggetto:** {titolo}\n"
-                f"💰 **Prezzo:** {prezzo} {valuta}\n"
-                f"🔍 **Ricerca:** {query}\n\n"
-                f"[🔗 Apri su Vinted]({link})"
-            )
-
-            # Qui potresti aggiungere un controllo per non inviare doppioni,
-            # per ora inviamo la notifica di test/monitoraggio
             print(f"Trovato: {titolo} a {prezzo} {valuta}")
-
         else:
-          print(
-              f"Errore nella richiesta Vinted per '{query}':"
-              f" {response.status_code}"
-          )
+          print(f"Risposta Vinted per '{query}': {response.status_code}")
 
       except Exception as e:
         print(f"Errore durante lo scraping di '{query}': {e}")
 
-      # Pausa tra una ricerca e l'altra per evitare blocchi IP
-      time.sleep(30)
+      time.sleep(45)
 
-    # Pausa principale prima del prossimo ciclo completo
     time.sleep(300)
 
 
-# --- AVVIO CONTENITORI ---
-if __name__ == "__main__":
-  # Facciamo partire Flask in un thread separato così non blocca il bot
-  t = threading.Thread(target=run_flask)
-  t.daemon = True
-  t.start()
+# --- AVVIO DEL THREAD DEL BOT ---
+# Fa partire il bot in background non appena lo script viene caricato
+bot_thread = threading.Thread(target=cerca_affari, daemon=True)
+bot_thread.start()
 
-  # Avviamo il ciclo principale del bot
-  cerca_affari()
+if __name__ == "__main__":
+  port = int(os.environ.get("PORT", 10000))
+  app.run(host="0.0.0.0", port=port)
