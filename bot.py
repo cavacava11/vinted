@@ -33,8 +33,8 @@ def manda_messaggio_telegram(testo):
 
 # --- LOGICA DEL BOT VINTED ---
 def cerca_affari():
-  print("Bot avviato in background, attesa connessione...")
-  time.sleep(10)  # Breve attesa per stabilizzare il server
+  print("Bot avviato in background...")
+  time.sleep(5)
   manda_messaggio_telegram(
       "🚀 **Bot Vinted avviato con successo su Render!**\nA caccia di"
       " streetwear..."
@@ -71,8 +71,6 @@ def cerca_affari():
             titolo = p.get("title")
             prezzo = p.get("price")
             valuta = p.get("currency", "€")
-            link = f"https://www.vinted.it{p.get('url')}"
-
             print(f"Trovato: {titolo} a {prezzo} {valuta}")
         else:
           print(f"Risposta Vinted per '{query}': {response.status_code}")
@@ -85,11 +83,7 @@ def cerca_affari():
     time.sleep(300)
 
 
-# --- AVVIO DEL THREAD DEL BOT ---
-# Fa partire il bot in background non appena lo script viene caricato
+# --- AVVIO AUTOMATICO DEL THREAD ---
+# Questo fa partire il bot non appena Gunicorn carica l'applicazione
 bot_thread = threading.Thread(target=cerca_affari, daemon=True)
 bot_thread.start()
-
-if __name__ == "__main__":
-  port = int(os.environ.get("PORT", 10000))
-  app.run(host="0.0.0.0", port=port)
