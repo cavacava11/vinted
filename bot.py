@@ -5,7 +5,7 @@ import google.generativeai as genai
 from flask import Flask
 import requests
 
-# --- CONFIGURAZIONE FLASK (Server Web per Render) ---
+# --- CONFIGURAZIONE FLASK ---
 app = Flask(__name__)
 
 
@@ -41,47 +41,73 @@ def manda_messaggio_telegram(testo):
 
 
 def analizza_con_gemini(
-    titolo, prezzo, target_vetrina, like, offerte, spedizione
+    titolo, prezzo, target_vetrina, like, offerte, spedizione, url_annuncio
 ):
   if not GEMINI_API_KEY:
     return "Gemini API Key non configurata."
 
-  prompt = (
-      f"Analizza questo affare di reselling streetwear su Vinted:\n"
-      f"- Articolo: {titolo}\n"
-      f"- Prezzo d'acquisto: {prezzo}€\n"
-      f"- Spedizione minima stimata: {spedizione}€\n"
-      f"- Target prezzo in vetrina: {target_vetrina}€\n"
-      f"- Like ricevuti: {like}\n"
-      f"- Offerte già ricevute: {offerte}\n\n"
-      "Calcola il ROI effettivo considerando il costo totale (acquisto + spedizione). "
-      "Fornisci un giudizio rapido (compralo subito / da valutare) e il margine di guadagno stimato. "
-      "Sii sintetico, ideale per una notifica Telegram."
-  )
+  prompt = f"""
+    Analizza questo articolo appena caricato su Vinted per reselling streetwear/vintage:
+    - Articolo: {titolo}
+    - Prezzo d'acquisto: {prezzo}€
+    - Spedizione + Commissioni stimate: {spedizione}€
+    - Target stimato di rivendita in vetrina: {target_vetrina}€
+    - Like attuali: {like}
+    - Offerte già ricevute: {offerte}
+
+    Istruzioni di calcolo e filtro:
+    1. Calcola il Costo Totale = {prezzo} + {spedizione}.
+    2. Calcola il Profitto Netto = {target_vetrina} - Costo Totale.
+    3. Calcola la ROI % = (Profitto Netto / Costo Totale) * 100.
+    
+    CRITERIO NOTIFICA:
+    - Se la ROI % è INFERIORE al 100%, rispondi ESATTAMENTE con la parola: NO_NOTIFICA
+    - Se la ROI % è PARI O SUPERIORE al 100%, fornisci un'analisi sintetica strutturata così:
+      🔥 **AFFARE IDENTIFICATO!**
+      - **Articolo**: {titolo}
+      - **Costo Totale**: [Costo Totale]€ (Prezzo: {prezzo}€ + Sped: {spedizione}€)
+      - **Stima Rivendita**: {target_vetrina}€
+      - **Profitto Netto**: [Profitto Netto]€
+      - **ROI Stimata**: [ROI]%
+      - **Interesse**: {like} Like | {offerte} Offerte
+      - **Perché comprarlo**: [Spiega in 2 frasi la nicchia, il trend (es. Y2K, Blokecore, Center Swoosh) e la facilità di rivendita basandoti sul valore di mercato attuale]
+      - **Link**: {url_annuncio}
+    """
 
   try:
     model = genai.GenerativeModel("gemini-1.5-flash")
     response = model.generate_content(prompt)
-    return response.text
+    return response.text.strip()
   except Exception as e:
     return f"Errore analisi Gemini: {e}"
 
 
 # --- LOGICA DEL BOT VINTED ---
 def cerca_affari():
-  print("Bot avviato in background con limite acquisto a 15€...")
+  print("Bot avviato con filtri aggiornati (Migliori annunci recenti)...")
   time.sleep(3)
 
   manda_messaggio_telegram(
-      "🚀 *Bot Vinted Arbitrage operativo!*\nFiltro prezzo massimo d'acquisto"
-      " aggiornato a *15€*."
+      "🚀 *Bot Vinted Arbitrage Operativo!*\n"
+      "• Ricerche sui *Più Recenti* (`newest_first`)\n"
+      "• Prezzi: Nike/Jordan/Tech fino a *12€* | Vintage/Tracktop fino a *8€*\n"
+      "• Criterio Notifica: Solo ROI >= *100% Netto*"
   )
 
-  # Ricerche con prezzo massimo di acquisto impostato a 15€ e target di vetrina associato
   ricerche = [
-      {"query": "nike center swoosh", "prezzo_max": 15, "target_vetrina": 35},
-      {"query": "nike tech fleece", "prezzo_max": 15, "target_vetrina": 45},
-      {"query": "jordan hoodie", "prezzo_max": 15, "target_vetrina": 40},
+      # Categoria High-Tier (Max 12€)
+      {"query": "nike tech fleece", "prezzo_max": 12, "target_vetrina": 45},
+      {"query": "nike center swoosh", "prezzo_max": 12, "target_vetrina": 35},
+      {"query": "jordan hoodie", "prezzo_max": 12, "target_vetrina": 35},
+      {"query": "felpa nike", "prezzo_max": 12, "target_vetrina": 30},
+      # Categoria Vintage & Maranza / Y2K (Max 8€)
+      {"query": "felpa adidas", "prezzo_max": 8, "target_vetrina": 25},
+      {"query": "felpa vintage", "prezzo_max": 8, "target_vetrina": 28},
+      {"query": "giacca a vento nike", "prezzo_max": 8, "target_vetrina": 30},
+      {"query": "windbreaker vintage", "prezzo_max": 8, "target_vetrina": 28},
+      {"query": "tracktop adidas", "prezzo_max": 8, "target_vetrina": 30},
+      {"query": "giacca tuta adidas", "prezzo_max": 8, "target_vetrina": 28},
+      {"query": "giacca acetata", "prezzo_max": 8, "target_vetrina": 25},
   ]
 
   session = requests.Session()
@@ -99,22 +125,29 @@ def cerca_affari():
       prezzo_max = item["prezzo_max"]
       target_vetrina = item["target_vetrina"]
 
-      url = f"https://www.vinted.it/catalog?search_text={query}&price_to={prezzo_max}&currency=EUR"
+      # URL ordinato per I PIÙ RECENTI (order=newest_first)
+      url = f"https://www.vinted.it/catalog?search_text={query}&price_to={prezzo_max}&currency=EUR&order=newest_first"
 
       try:
         response = session.get(url, headers=headers, timeout=10)
         print(
-            f"Controllo ricerca '{query}' (max {prezzo_max}€): stato HTTP"
+            f"Controllo recenti '{query}' (max {prezzo_max}€): stato HTTP"
             f" {response.status_code}"
         )
+
+        # Inserire qui la logica di parsing dell'HTML/JSON dell'annuncio
+        # Quando un annuncio viene estratto, invialo a Gemini:
+        # risultato = analizza_con_gemini(titolo, prezzo, target_vetrina, like, offerte, 4.0, url_annuncio)
+        # if "NO_NOTIFICA" not in risultato:
+        #     manda_messaggio_telegram(risultato)
+
       except Exception as e:
         print(f"Errore durante la richiesta per '{query}': {e}")
 
-      time.sleep(45)
+      time.sleep(30)
 
-    time.sleep(120)
+    time.sleep(90)
 
 
-# --- AVVIO AUTOMATICO DEL THREAD PER GUNICORN ---
 bot_thread = threading.Thread(target=cerca_affari, daemon=True)
 bot_thread.start()
