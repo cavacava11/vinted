@@ -31,7 +31,12 @@ def manda_messaggio_telegram(testo):
   token = TELEGRAM_TOKEN.strip()
   chat = CHAT_ID.strip()
   url = f"https://api.telegram.org/bot{token}/sendMessage"
-  payload = {"chat_id": chat, "text": testo, "parse_mode": "Markdown"}
+  payload = {
+      "chat_id": chat,
+      "text": testo,
+      "parse_mode": "Markdown",
+      "disable_web_page_preview": False,
+  }
 
   try:
     response = requests.post(url, json=payload, timeout=10)
@@ -41,7 +46,7 @@ def manda_messaggio_telegram(testo):
 
 
 def analizza_con_gemini(
-    titolo, prezzo, target_vetrina, like, offerte, spedizione, url_annuncio
+    titolo, prezzo, target_vetrina, like, spedizione, url_annuncio
 ):
   if not GEMINI_API_KEY:
     return "Gemini API Key non configurata."
@@ -52,8 +57,7 @@ def analizza_con_gemini(
     - Prezzo d'acquisto: {prezzo}€
     - Spedizione + Commissioni stimate: {spedizione}€
     - Target stimato di rivendita in vetrina: {target_vetrina}€
-    - Like attuali: {like}
-    - Offerte già ricevute: {offerte}
+    - Like / Preferiti attuali: {like}
 
     Istruzioni di calcolo e filtro:
     1. Calcola il Costo Totale = {prezzo} + {spedizione}.
@@ -62,15 +66,14 @@ def analizza_con_gemini(
     
     CRITERIO NOTIFICA:
     - Se la ROI % è INFERIORE al 100%, rispondi ESATTAMENTE con la parola: NO_NOTIFICA
-    - Se la ROI % è PARI O SUPERIORE al 100%, fornisci un'analisi sintetica strutturata così:
+    - Se la ROI % è PARI O SUPERIORE al 100%, fornisci un'analisi sintetica strutturata esattamente così:
       🔥 **AFFARE IDENTIFICATO!**
       - **Articolo**: {titolo}
-      - **Costo Totale**: [Costo Totale]€ (Prezzo: {prezzo}€ + Sped: {spedizione}€)
-      - **Stima Rivendita**: {target_vetrina}€
-      - **Profitto Netto**: [Profitto Netto]€
-      - **ROI Stimata**: [ROI]%
-      - **Interesse**: {like} Like | {offerte} Offerte
-      - **Perché comprarlo**: [Spiega in 2 frasi la nicchia, il trend (es. Y2K, Blokecore, Center Swoosh) e la facilità di rivendita basandoti sul valore di mercato attuale]
+      - **Prezzo d'Acquisto**: {prezzo}€ (+ {spedizione}€ sped/comm)
+      - **Target Rivendita**: {target_vetrina}€
+      - **ROI Stimata**: [ROI]% (Profitto Netto: [Profitto Netto]€)
+      - **Social Proof**: {like} Like
+      - **Perché comprarlo**: [Spiega in 2 frasi il valore di mercato, la nicchia (es. Y2K, Center Swoosh, Blokecore, Maranza) e la velocità di rivendita]
       - **Link**: {url_annuncio}
     """
 
@@ -84,23 +87,23 @@ def analizza_con_gemini(
 
 # --- LOGICA DEL BOT VINTED ---
 def cerca_affari():
-  print("Bot avviato con filtri aggiornati (Migliori annunci recenti)...")
+  print("Bot avviato con API Vinted e filtri ROI...")
   time.sleep(3)
 
   manda_messaggio_telegram(
       "🚀 *Bot Vinted Arbitrage Operativo!*\n"
-      "• Ricerche sui *Più Recenti* (`newest_first`)\n"
-      "• Prezzi: Nike/Jordan/Tech fino a *12€* | Vintage/Tracktop fino a *8€*\n"
-      "• Criterio Notifica: Solo ROI >= *100% Netto*"
+      "• Monitoraggio in tempo reale (`newest_first`)\n"
+      "• Filtro Notifica: Solo articoli con *ROI >= 100% Netto*\n"
+      "• Analisi trend e social proof inclusa."
   )
 
   ricerche = [
-      # Categoria High-Tier (Max 12€)
+      # High-Tier (Max 12€)
       {"query": "nike tech fleece", "prezzo_max": 12, "target_vetrina": 45},
       {"query": "nike center swoosh", "prezzo_max": 12, "target_vetrina": 35},
       {"query": "jordan hoodie", "prezzo_max": 12, "target_vetrina": 35},
       {"query": "felpa nike", "prezzo_max": 12, "target_vetrina": 30},
-      # Categoria Vintage & Maranza / Y2K (Max 8€)
+      # Vintage & Tracktop / Maranza (Max 8€)
       {"query": "felpa adidas", "prezzo_max": 8, "target_vetrina": 25},
       {"query": "felpa vintage", "prezzo_max": 8, "target_vetrina": 28},
       {"query": "giacca a vento nike", "prezzo_max": 8, "target_vetrina": 30},
@@ -116,8 +119,17 @@ def cerca_affari():
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
           " like Gecko) Chrome/122.0.0.0 Safari/537.36"
       ),
+      "Accept": "application/json, text/plain, */*",
       "Accept-Language": "it-IT,it;q=0.9",
   }
+
+  articoli_visti = set()
+
+  # Inizializza i cookie visitando la home page di Vinted
+  try:
+    session.get("https://www.vinted.it", headers=headers, timeout=10)
+  except Exception as e:
+    print(f"Errore inizializzazione sessione Vinted: {e}")
 
   while True:
     for item in ricerche:
@@ -125,28 +137,65 @@ def cerca_affari():
       prezzo_max = item["prezzo_max"]
       target_vetrina = item["target_vetrina"]
 
-      # URL ordinato per I PIÙ RECENTI (order=newest_first)
-      url = f"https://www.vinted.it/catalog?search_text={query}&price_to={prezzo_max}&currency=EUR&order=newest_first"
+      # API endpoint per ricerca articoli ordinati per più recenti
+      api_url = f"https://www.vinted.it/api/v2/catalog/items?search_text={query}&price_to={prezzo_max}&currency=EUR&order=newest_first&per_page=10"
 
       try:
-        response = session.get(url, headers=headers, timeout=10)
-        print(
-            f"Controllo recenti '{query}' (max {prezzo_max}€): stato HTTP"
-            f" {response.status_code}"
-        )
+        res = session.get(api_url, headers=headers, timeout=10)
 
-        # Inserire qui la logica di parsing dell'HTML/JSON dell'annuncio
-        # Quando un annuncio viene estratto, invialo a Gemini:
-        # risultato = analizza_con_gemini(titolo, prezzo, target_vetrina, like, offerte, 4.0, url_annuncio)
-        # if "NO_NOTIFICA" not in risultato:
-        #     manda_messaggio_telegram(risultato)
+        # Se i cookie sono scaduti, li rigeneriamo
+        if res.status_code in [401, 403]:
+          session.get("https://www.vinted.it", headers=headers, timeout=10)
+          res = session.get(api_url, headers=headers, timeout=10)
+
+        if res.status_code == 200:
+          data = res.json()
+          items = data.get("items", [])
+
+          for articolo in items:
+            item_id = articolo.get("id")
+            if item_id in articoli_visti:
+              continue
+
+            articoli_visti.add(item_id)
+
+            # Estrazione Dati Articolo
+            titolo = articolo.get("title", "Senza titolo")
+            prezzo_str = articolo.get("price", "0")
+            prezzo = float(prezzo_str) if prezzo_str else 0.0
+            like = articolo.get("favourite_count", 0)
+            url_annuncio = articolo.get("url", "")
+
+            # Costo indicativo di spedizione + commissioni Vinted
+            spedizione_stima = 4.0
+
+            # Analisi con Gemini
+            risultato = analizza_con_gemini(
+                titolo=titolo,
+                prezzo=prezzo,
+                target_vetrina=target_vetrina,
+                like=like,
+                spedizione=spedizione_stima,
+                url_annuncio=url_annuncio,
+            )
+
+            # Invia la notifica solo se passa il filtro ROI
+            if "NO_NOTIFICA" not in risultato and risultato.strip():
+              manda_messaggio_telegram(risultato)
+
+        else:
+          print(
+              f"Ricerca '{query}': Stato {res.status_code} (possibile limit"
+              " temporaneo)"
+          )
 
       except Exception as e:
-        print(f"Errore durante la richiesta per '{query}': {e}")
+        print(f"Errore durante l'estrazione per '{query}': {e}")
 
-      time.sleep(30)
+      time.sleep(15)
 
-    time.sleep(90)
+    # Pausa tra i cicli di ricerca
+    time.sleep(60)
 
 
 bot_thread = threading.Thread(target=cerca_affari, daemon=True)
