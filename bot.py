@@ -5,7 +5,7 @@ import google.generativeai as genai
 from flask import Flask
 import requests
 
-# --- CONFIGURAZIONE FLASK (Per mantenere attivo il server su Render) ---
+# --- CONFIGURAZIONE FLASK ---
 app = Flask(__name__)
 
 
@@ -18,6 +18,7 @@ def home():
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+SCRAPERAPI_KEY = os.environ.get("SCRAPERAPI_KEY")
 
 if GEMINI_API_KEY:
   genai.configure(api_key=GEMINI_API_KEY)
@@ -85,15 +86,15 @@ def analizza_con_gemini(
     return f"Errore analisi Gemini: {e}"
 
 
-# --- LOGICA DI SCRAPING E RETRY SESSIONE ---
+# --- LOGICA DI SCRAPING VIA SCRAPERAPI ---
 def cerca_affari():
-  print("Bot avviato con gestione sessione avanzata e ROI >= 100%...")
+  print("Bot avviato con ScraperAPI e filtro ROI >= 100%...")
   time.sleep(3)
 
   manda_messaggio_telegram(
       "🚀 *Bot Vinted Arbitrage Operativo!*\n"
-      "• ROI minima confermata: *>= 100% Netto*\n"
-      "• Refresh automatico sessione Vinted attivo."
+      "• Bypass Cloudflare attivo via ScraperAPI\n"
+      "• ROI minima confermata: *>= 100% Netto*"
   )
 
   ricerche = [
@@ -112,29 +113,7 @@ def cerca_affari():
       {"query": "giacca acetata", "prezzo_max": 8, "target_vetrina": 25},
   ]
 
-  session = requests.Session()
-  headers = {
-      "User-Agent": (
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
-          " like Gecko) Chrome/124.0.0.0 Safari/537.36"
-      ),
-      "Accept": "application/json, text/plain, */*",
-      "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
-      "Referer": "https://www.vinted.it/",
-  }
-
   articoli_visti = set()
-
-  def rinnova_sessione():
-    print("Inizializzazione/Rinnovo cookie di sessione Vinted...")
-    session.cookies.clear()
-    try:
-      r = session.get("https://www.vinted.it", headers=headers, timeout=10)
-      print(f"Stato refresh sessione: {r.status_code}")
-    except Exception as e:
-      print(f"Errore durante il refresh sessione: {e}")
-
-  rinnova_sessione()
 
   while True:
     for item in ricerche:
@@ -142,25 +121,23 @@ def cerca_affari():
       prezzo_max = item["prezzo_max"]
       target_vetrina = item["target_vetrina"]
 
-      api_url = f"https://www.vinted.it/api/v2/catalog/items?search_text={query}&price_to={prezzo_max}&currency=EUR&order=newest_first&per_page=10"
+      vinted_url = f"https://www.vinted.it/api/v2/catalog/items?search_text={query}&price_to={prezzo_max}&currency=EUR&order=newest_first&per_page=10"
+
+      # Se SCRAPERAPI_KEY è configurata, passa attraverso il proxy anti-bot
+      if SCRAPERAPI_KEY:
+        api_url = f"http://api.scraperapi.com?api_key={SCRAPERAPI_KEY.strip()}&url={vinted_url}"
+      else:
+        api_url = vinted_url
 
       try:
-        res = session.get(api_url, headers=headers, timeout=10)
-
-        # Se veniamo bloccati (401/403/429), rinnoviamo i cookie
-        if res.status_code in [401, 403, 429]:
-          print(
-              f"⚠️ Blocco rilevato per '{query}' (HTTP {res.status_code})."
-              " Rinnovo sessione..."
-          )
-          rinnova_sessione()
-          time.sleep(3)
-          res = session.get(api_url, headers=headers, timeout=10)
+        res = requests.get(api_url, timeout=20)
 
         if res.status_code == 200:
           data = res.json()
           items = data.get("items", [])
-          print(f"Ricerca '{query}': trovati {len(items)} articoli da analizzare.")
+          print(
+              f"Ricerca '{query}': Trovati {len(items)} articoli da analizzare."
+          )
 
           for articolo in items:
             item_id = articolo.get("id")
@@ -171,7 +148,6 @@ def cerca_affari():
 
             titolo = articolo.get("title", "Senza titolo")
 
-            # Gestione sicura del formato del prezzo (float o dict)
             raw_price = articolo.get("price")
             if isinstance(raw_price, dict):
               prezzo = float(raw_price.get("amount", 0.0))
@@ -183,7 +159,6 @@ def cerca_affari():
             like = articolo.get("favourite_count", 0)
             url_annuncio = articolo.get("url", "")
 
-            # Analisi ROI con Gemini
             risultato = analizza_con_gemini(
                 titolo=titolo,
                 prezzo=prezzo,
@@ -202,16 +177,15 @@ def cerca_affari():
       except Exception as e:
         print(f"Eccezione durante la ricerca '{query}': {e}")
 
-      time.sleep(15)
+      time.sleep(20)
 
     time.sleep(60)
 
 
-# --- AVVIO THREAD SEPARATO PER IL BOT ---
+# --- AVVIO THREAD E SERVER FLASK ---
 bot_thread = threading.Thread(target=cerca_affari, daemon=True)
 bot_thread.start()
 
-# --- AVVIO SERVER FLASK ---
 if __name__ == "__main__":
   port = int(os.environ.get("PORT", 10000))
   app.run(host="0.0.0.0", port=port)
