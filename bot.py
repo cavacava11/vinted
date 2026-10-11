@@ -5,7 +5,7 @@ import google.generativeai as genai
 from flask import Flask
 import requests
 
-# --- CONFIGURAZIONE FLASK ---
+# --- CONFIGURAZIONE FLASK (Per mantenere attivo il server su Render) ---
 app = Flask(__name__)
 
 
@@ -64,7 +64,7 @@ def analizza_con_gemini(
     2. Calcola il Profitto Netto = {target_vetrina} - Costo Totale.
     3. Calcola la ROI % = (Profitto Netto / Costo Totale) * 100.
     
-    CRITERIO NOTIFICA:
+    CRITERIO NOTIFICA RIGIDO:
     - Se la ROI % è INFERIORE al 100%, rispondi ESATTAMENTE con la parola: NO_NOTIFICA
     - Se la ROI % è PARI O SUPERIORE al 100%, fornisci un'analisi sintetica strutturata esattamente così:
       🔥 **AFFARE IDENTIFICATO!**
@@ -73,7 +73,7 @@ def analizza_con_gemini(
       - **Target Rivendita**: {target_vetrina}€
       - **ROI Stimata**: [ROI]% (Profitto Netto: [Profitto Netto]€)
       - **Social Proof**: {like} Like
-      - **Perché comprarlo**: [Spiega in 2 frasi il valore di mercato, la nicchia (es. Y2K, Center Swoosh, Blokecore, Maranza) e la velocità di rivendita]
+      - **Perché comprarlo**: [Spiega in 2 frasi il valore di mercato, la nicchia e la velocità di rivendita]
       - **Link**: {url_annuncio}
     """
 
@@ -85,16 +85,15 @@ def analizza_con_gemini(
     return f"Errore analisi Gemini: {e}"
 
 
-# --- LOGICA DEL BOT VINTED ---
+# --- LOGICA DI SCRAPING E RETRY SESSIONE ---
 def cerca_affari():
-  print("Bot avviato con API Vinted e filtri ROI...")
+  print("Bot avviato con gestione sessione avanzata e ROI >= 100%...")
   time.sleep(3)
 
   manda_messaggio_telegram(
       "🚀 *Bot Vinted Arbitrage Operativo!*\n"
-      "• Monitoraggio in tempo reale (`newest_first`)\n"
-      "• Filtro Notifica: Solo articoli con *ROI >= 100% Netto*\n"
-      "• Analisi trend e social proof inclusa."
+      "• ROI minima confermata: *>= 100% Netto*\n"
+      "• Refresh automatico sessione Vinted attivo."
   )
 
   ricerche = [
@@ -117,19 +116,25 @@ def cerca_affari():
   headers = {
       "User-Agent": (
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
-          " like Gecko) Chrome/122.0.0.0 Safari/537.36"
+          " like Gecko) Chrome/124.0.0.0 Safari/537.36"
       ),
       "Accept": "application/json, text/plain, */*",
-      "Accept-Language": "it-IT,it;q=0.9",
+      "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+      "Referer": "https://www.vinted.it/",
   }
 
   articoli_visti = set()
 
-  # Inizializza i cookie visitando la home page di Vinted
-  try:
-    session.get("https://www.vinted.it", headers=headers, timeout=10)
-  except Exception as e:
-    print(f"Errore inizializzazione sessione Vinted: {e}")
+  def rinnova_sessione():
+    print("Inizializzazione/Rinnovo cookie di sessione Vinted...")
+    session.cookies.clear()
+    try:
+      r = session.get("https://www.vinted.it", headers=headers, timeout=10)
+      print(f"Stato refresh sessione: {r.status_code}")
+    except Exception as e:
+      print(f"Errore durante il refresh sessione: {e}")
+
+  rinnova_sessione()
 
   while True:
     for item in ricerche:
@@ -137,20 +142,25 @@ def cerca_affari():
       prezzo_max = item["prezzo_max"]
       target_vetrina = item["target_vetrina"]
 
-      # API endpoint per ricerca articoli ordinati per più recenti
       api_url = f"https://www.vinted.it/api/v2/catalog/items?search_text={query}&price_to={prezzo_max}&currency=EUR&order=newest_first&per_page=10"
 
       try:
         res = session.get(api_url, headers=headers, timeout=10)
 
-        # Se i cookie sono scaduti, li rigeneriamo
-        if res.status_code in [401, 403]:
-          session.get("https://www.vinted.it", headers=headers, timeout=10)
+        # Se veniamo bloccati (401/403/429), rinnoviamo i cookie
+        if res.status_code in [401, 403, 429]:
+          print(
+              f"⚠️ Blocco rilevato per '{query}' (HTTP {res.status_code})."
+              " Rinnovo sessione..."
+          )
+          rinnova_sessione()
+          time.sleep(3)
           res = session.get(api_url, headers=headers, timeout=10)
 
         if res.status_code == 200:
           data = res.json()
           items = data.get("items", [])
+          print(f"Ricerca '{query}': trovati {len(items)} articoli da analizzare.")
 
           for articolo in items:
             item_id = articolo.get("id")
@@ -159,44 +169,49 @@ def cerca_affari():
 
             articoli_visti.add(item_id)
 
-            # Estrazione Dati Articolo
             titolo = articolo.get("title", "Senza titolo")
-            prezzo_str = articolo.get("price", "0")
-            prezzo = float(prezzo_str) if prezzo_str else 0.0
+
+            # Gestione sicura del formato del prezzo (float o dict)
+            raw_price = articolo.get("price")
+            if isinstance(raw_price, dict):
+              prezzo = float(raw_price.get("amount", 0.0))
+            elif raw_price is not None:
+              prezzo = float(raw_price)
+            else:
+              prezzo = 0.0
+
             like = articolo.get("favourite_count", 0)
             url_annuncio = articolo.get("url", "")
 
-            # Costo indicativo di spedizione + commissioni Vinted
-            spedizione_stima = 4.0
-
-            # Analisi con Gemini
+            # Analisi ROI con Gemini
             risultato = analizza_con_gemini(
                 titolo=titolo,
                 prezzo=prezzo,
                 target_vetrina=target_vetrina,
                 like=like,
-                spedizione=spedizione_stima,
+                spedizione=4.0,
                 url_annuncio=url_annuncio,
             )
 
-            # Invia la notifica solo se passa il filtro ROI
             if "NO_NOTIFICA" not in risultato and risultato.strip():
               manda_messaggio_telegram(risultato)
 
         else:
-          print(
-              f"Ricerca '{query}': Stato {res.status_code} (possibile limit"
-              " temporaneo)"
-          )
+          print(f"Errore HTTP {res.status_code} per la query '{query}'")
 
       except Exception as e:
-        print(f"Errore durante l'estrazione per '{query}': {e}")
+        print(f"Eccezione durante la ricerca '{query}': {e}")
 
       time.sleep(15)
 
-    # Pausa tra i cicli di ricerca
     time.sleep(60)
 
 
+# --- AVVIO THREAD SEPARATO PER IL BOT ---
 bot_thread = threading.Thread(target=cerca_affari, daemon=True)
 bot_thread.start()
+
+# --- AVVIO SERVER FLASK ---
+if __name__ == "__main__":
+  port = int(os.environ.get("PORT", 10000))
+  app.run(host="0.0.0.0", port=port)
