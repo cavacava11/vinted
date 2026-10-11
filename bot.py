@@ -1,11 +1,11 @@
 import os
 import threading
 import time
+from urllib.parse import quote
 import google.generativeai as genai
 from flask import Flask
 import requests
 
-# --- CONFIGURAZIONE FLASK ---
 app = Flask(__name__)
 
 
@@ -14,7 +14,6 @@ def home():
   return "Il bot Vinted Arbitrage è attivo e operativo 24/7!"
 
 
-# --- CONFIGURAZIONE CHIAVI E API ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -26,7 +25,7 @@ if GEMINI_API_KEY:
 
 def manda_messaggio_telegram(testo):
   if not TELEGRAM_TOKEN or not CHAT_ID:
-    print("Telegram Token o Chat ID mancanti.")
+    print("Telegram Token o Chat ID mancanti.", flush=True)
     return
 
   token = TELEGRAM_TOKEN.strip()
@@ -41,9 +40,12 @@ def manda_messaggio_telegram(testo):
 
   try:
     response = requests.post(url, json=payload, timeout=10)
-    print(f"Risposta invio Telegram: {response.status_code}")
+    print(
+        f"Risposta invio Telegram: {response.status_code}",
+        flush=True,
+    )
   except Exception as e:
-    print(f"Errore nell'invio del messaggio Telegram: {e}")
+    print(f"Errore nell'invio del messaggio Telegram: {e}", flush=True)
 
 
 def analizza_con_gemini(
@@ -86,24 +88,24 @@ def analizza_con_gemini(
     return f"Errore analisi Gemini: {e}"
 
 
-# --- LOGICA DI SCRAPING VIA SCRAPERAPI ---
 def cerca_affari():
-  print("Bot avviato con ScraperAPI e filtro ROI >= 100%...")
-  time.sleep(3)
+  print(
+      "=== INIZIO LOOP DI RICERCA CON SCRAPERAPI ===",
+      flush=True,
+  )
+  time.sleep(2)
 
   manda_messaggio_telegram(
       "🚀 *Bot Vinted Arbitrage Operativo!*\n"
-      "• Bypass Cloudflare attivo via ScraperAPI\n"
+      "• ScraperAPI attivo e log sincroni\n"
       "• ROI minima confermata: *>= 100% Netto*"
   )
 
   ricerche = [
-      # High-Tier (Max 12€)
       {"query": "nike tech fleece", "prezzo_max": 12, "target_vetrina": 45},
       {"query": "nike center swoosh", "prezzo_max": 12, "target_vetrina": 35},
       {"query": "jordan hoodie", "prezzo_max": 12, "target_vetrina": 35},
       {"query": "felpa nike", "prezzo_max": 12, "target_vetrina": 30},
-      # Vintage & Tracktop / Maranza (Max 8€)
       {"query": "felpa adidas", "prezzo_max": 8, "target_vetrina": 25},
       {"query": "felpa vintage", "prezzo_max": 8, "target_vetrina": 28},
       {"query": "giacca a vento nike", "prezzo_max": 8, "target_vetrina": 30},
@@ -121,22 +123,27 @@ def cerca_affari():
       prezzo_max = item["prezzo_max"]
       target_vetrina = item["target_vetrina"]
 
-      vinted_url = f"https://www.vinted.it/api/v2/catalog/items?search_text={query}&price_to={prezzo_max}&currency=EUR&order=newest_first&per_page=10"
+      vinted_url = f"https://www.vinted.it/api/v2/catalog/items?search_text={quote(query)}&price_to={prezzo_max}&currency=EUR&order=newest_first&per_page=10"
 
-      # Se SCRAPERAPI_KEY è configurata, passa attraverso il proxy anti-bot
       if SCRAPERAPI_KEY:
-        api_url = f"http://api.scraperapi.com?api_key={SCRAPERAPI_KEY.strip()}&url={vinted_url}"
+        api_url = f"http://api.scraperapi.com?api_key={SCRAPERAPI_KEY.strip()}&url={quote(vinted_url)}"
       else:
         api_url = vinted_url
 
+      print(
+          f"--> Avvio ricerca per: '{query}'...",
+          flush=True,
+      )
+
       try:
-        res = requests.get(api_url, timeout=20)
+        res = requests.get(api_url, timeout=25)
 
         if res.status_code == 200:
           data = res.json()
           items = data.get("items", [])
           print(
-              f"Ricerca '{query}': Trovati {len(items)} articoli da analizzare."
+              f"✅ Ricerca '{query}': Trovati {len(items)} articoli.",
+              flush=True,
           )
 
           for articolo in items:
@@ -169,20 +176,33 @@ def cerca_affari():
             )
 
             if "NO_NOTIFICA" not in risultato and risultato.strip():
+              print(
+                  f"🔥 Trovata occasione ({titolo}), invio su Telegram...",
+                  flush=True,
+              )
               manda_messaggio_telegram(risultato)
 
         else:
-          print(f"Errore HTTP {res.status_code} per la query '{query}'")
+          print(
+              f"❌ Errore HTTP {res.status_code} per la query '{query}'",
+              flush=True,
+          )
 
       except Exception as e:
-        print(f"Eccezione durante la ricerca '{query}': {e}")
+        print(
+            f"⚠️ Eccezione durante la ricerca '{query}': {e}",
+            flush=True,
+        )
 
-      time.sleep(20)
+      time.sleep(15)
 
+    print(
+        "=== CICLO COMPLETATO, PAUSA DI 60 SECONDI ===",
+        flush=True,
+    )
     time.sleep(60)
 
 
-# --- AVVIO THREAD E SERVER FLASK ---
 bot_thread = threading.Thread(target=cerca_affari, daemon=True)
 bot_thread.start()
 
